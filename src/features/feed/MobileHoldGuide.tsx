@@ -104,7 +104,7 @@ function GuideContent({ target, bottomInset, onClose }: Omit<Props, "open">) {
       </div>
     </>}
     <div className="mobile-hold-guide-footer">
-      <p>加速时上滑，可锁定 2×</p>
+      <p>长按加速 · 左右滑换挡 · 移入顶部标签锁定</p>
       <p>双击暂停播放</p>
       <Button className="mobile-hold-guide-done" onClick={onClose} data-autofocus>知道了</Button>
     </div>

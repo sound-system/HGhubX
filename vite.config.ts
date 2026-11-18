@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { legacyCss } from "./scripts/legacy-css";
 
 const host = process.env.TAURI_DEV_HOST;
 const { version } = JSON.parse(
@@ -26,7 +27,8 @@ export default defineConfig(({ mode }) => {
         ),
       },
     },
-    plugins: [react(), tailwindcss()],
+    // optimize:false 让 Tailwind 不做本地 lightningcss 优化，兼容性变换统一交给 legacyCss。
+    plugins: [react(), tailwindcss({ optimize: false }), legacyCss()],
     clearScreen: false,
     // 版本号只维护 package.json（CI 会按 tag 改写它），界面里的版本由这里注入，避免写死后漂移
     define: {
@@ -40,10 +42,27 @@ export default defineConfig(({ mode }) => {
       watch: { ignored: ["**/src-tauri/**"] },
     },
     envPrefix: ["VITE_", "TAURI_ENV_*"],
+    worker: {
+      // Classic IIFE workers run on Chromium 66-79 WebViews where module workers are absent.
+      format: "iife",
+    },
     build: {
-      target: "es2021",
+      // 老 Android WebView（Chromium 66）与 iOS 13/14 的语法目标；#138 三设备实测的组合。
+      target: ["chrome66", "safari14.1"],
+      cssTarget: ["chrome66", "safari13"],
+      cssCodeSplit: false,
+      // legacyCss performs the final minification after compatibility transforms.
+      cssMinify: false,
       minify: "esbuild",
       sourcemap: false,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes("node_modules/hls.js")) return "hls";
+            return undefined;
+          },
+        },
+      },
     },
   };
 });

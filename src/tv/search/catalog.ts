@@ -3,6 +3,7 @@ import { api } from "../../shared/api/api";
 import type { Post, VideoCard } from "../../shared/api/types";
 import type { TvContent } from "../model";
 import type { CatalogCheckpoint, CatalogQuery, CatalogStatus, SearchPreferences, WorkerCommand, WorkerResponse } from "./protocol";
+import CatalogWorker from "./index.worker?worker";
 
 const DAY = 24 * 60 * 60 * 1000;
 const statuses = new Map<string, CatalogStatus>();
@@ -22,7 +23,7 @@ function publish(origin: string, next: Partial<CatalogStatus>) {
 }
 function getWorker() {
   if (worker) return worker;
-  worker = new Worker(new URL("./index.worker.ts", import.meta.url), { type: "module" });
+  worker = new CatalogWorker();
   worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
     const promise = pending.get(event.data.requestId);
     if (!promise) return;

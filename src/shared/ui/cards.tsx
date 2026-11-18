@@ -23,11 +23,12 @@ export function MediaCard({ title, cover, subtitle, badge, progress, score, prio
     <span className="ios-poster-title">已屏蔽内容</span>
     {progress && <span className="ios-poster-subtitle">{progress}</span>}
   </Button>;
+  const hasScore = typeof score === "number" && Number.isFinite(score) && score > 0;
   return <Button onClick={onOpen} className="ios-poster" aria-label={title}>
-    <span className={`ios-poster-art ${badge ? "has-poster-badge" : ""}`}>
+    <span className={`ios-poster-art${badge ? " has-poster-badge" : ""}${hasScore ? " has-score-badge" : ""}`}>
       <Img src={cover} alt="" eager={priority} />
       {badge && <span className="ios-poster-badge">{badge}</span>}
-      {typeof score === "number" && <ScoreBadge score={score} />}
+      {hasScore && <ScoreBadge score={score} />}
       {progress && <span className="ios-poster-progress"><IPlayF size={12} />{progress}</span>}
       <span className="ios-poster-play" aria-hidden="true"><IPlayF size={23} /></span>
     </span>
@@ -44,10 +45,10 @@ export function WaterfallCard({ v, onOpen, priority = false }: { v: VideoCard; o
 }
 
 export function Masonry({ videos, onOpen, wide = false, scopeKey }: {
-  videos: VideoCard[]; onOpen: (v: VideoCard) => void; wide?: boolean; gap?: string; scopeKey?: string | number;
+  videos: VideoCard[]; onOpen: (v: VideoCard, visible: VideoCard[]) => void; wide?: boolean; gap?: string; scopeKey?: string | number;
 }) {
   return <FilteredContent items={videos} scopeKey={scopeKey}>{visible => <div className={`ios-media-grid ${wide ? "is-wide" : ""}`} data-ui="media-grid">
-    {visible.map((v, index) => <WaterfallCard key={v.id} v={v} priority={index < 2} onOpen={() => onOpen(v)} />)}
+    {visible.map((v, index) => <WaterfallCard key={v.id} v={v} priority={index < 2} onOpen={() => onOpen(v, visible)} />)}
   </div>}</FilteredContent>;
 }
 

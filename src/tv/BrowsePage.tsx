@@ -64,7 +64,17 @@ export default function BrowsePage({ onOpen, active=true }: { onOpen: (content: 
         }
         if(current()){
           setItems(previous=>{const map=new Map((request.page===1?[]:previous).map(item=>[contentKey(item),item]));for(const item of added)map.set(contentKey(item),item);return [...map.values()];});
-          setDone(finished);setRetryable(retryCount);candidates.current=pending;seenPages.current=pages;nextPage.current=page+1;fulfilled.current=request;
+          setDone(finished);
+          if(channel==="posts"){
+            const addedKeys=new Set(added.map(contentKey));
+            const mergedCandidates=[...new Map([...(request.page===1?[]:candidates.current),...pending].filter(c=>!addedKeys.has(contentKey(c))).map(c=>[contentKey(c),c])).values()];
+            candidates.current=mergedCandidates;
+            setRetryable(prev=>request.page===1?retryCount:prev+retryCount);
+          }else{
+            candidates.current=[];
+            setRetryable(0);
+          }
+          seenPages.current=pages;nextPage.current=page+1;fulfilled.current=request;
         }
       }catch(e){if(current())setError(String(e));}finally{if(current())setBusy(false);}
     })(); return()=>{disposed=true;seq.current++;};
@@ -76,7 +86,12 @@ export default function BrowsePage({ onOpen, active=true }: { onOpen: (content: 
       const token=++seq.current, key=route;setBusy(true);setError("");
       const current=()=>token===seq.current&&routeRef.current===key&&activeRef.current;
       try{const result=await qualifyVisiblePosts(candidates.current,{source,isCurrent:current,allowed:c=>!prefsRef.current.blockReason(c.tags)},true);
-        if(current()){setItems(prev=>[...new Map([...prev,...result.items].map(c=>[contentKey(c),c])).values()]);setRetryable(result.retryable);}}
+        if(current()){
+          const resolvedKeys=new Set(result.items.map(contentKey));
+          candidates.current=candidates.current.filter(c=>!resolvedKeys.has(contentKey(c)));
+          setItems(prev=>[...new Map([...prev,...result.items].map(c=>[contentKey(c),c])).values()]);
+          setRetryable(result.retryable);
+        }}
       catch(e){if(current())setError(String(e));}
       finally{if(current())setBusy(false);}return;
     }
@@ -87,7 +102,7 @@ export default function BrowsePage({ onOpen, active=true }: { onOpen: (content: 
     {selection&&<button data-tv-focus="browse-up" onClick={()=>setSelection("")}>返回{channel==="tags"?"标签":"专题"}</button>}
     <TvStatus busy={busy} error={error} onRetry={()=>void retry()}/>
     {topics.length>0&&<div className="tv-grid" data-tv-region="topics" data-tv-columns="5">{topics.map(topic=><button className="tv-collection" data-tv-focus={`topic-${topic.slug}`} key={topic.slug} onClick={()=>setSelection(topic.slug)}><strong>{topic.title}</strong><small>{topic.video_count||0} 部</small></button>)}</div>}
-    {tags.map(group=><section key={group.name}><h2>{group.name}</h2><div className="tv-tags" data-tv-region={`tags-${group.name}`} data-tv-columns="5">{group.tags.filter(tag=>!preferences.isTagBlocked(tag.name)).map(tag=><button data-tv-focus={`tag-${tag.id}`} key={tag.id} onClick={()=>setSelection(tag.slug||tag.name)}>{tag.name}</button>)}</div></section>)}
+    {tags.map(group=><section key={group.name}><h2>{group.name}</h2><div className="tv-tags" data-tv-region={`tags-${group.name}`} data-tv-columns="5">{group.tags.filter(tag=>!preferences.isTagBlocked(tag.name)).map(tag=><button data-tv-focus={`tag-${tag.id}`} key={tag.id} onClick={()=>setSelection(tag.name)}>{tag.name}</button>)}</div></section>)}
     <div className={`tv-grid ${channel==="posts"?"tv-grid-wide":""}`} data-tv-region="browse-grid" data-tv-columns={channel==="posts"?3:5}>{items.filter(c=>!preferences.blockReason(c.tags)).map(content=><TvCard key={contentKey(content)} content={content} onOpen={onOpen}/>)}</div>
     {!busy&&retryable>0&&<p role="status">{retryable} 个候选暂未确认可播放。<button data-tv-focus="post-retry" onClick={()=>void retry()}>重试确认</button></p>}
     {!busy&&!done&&!error&&source&&<button data-tv-focus="browse-more" onClick={()=>setRequest(r=>({route,page:nextPage.current,retry:r.retry}))}>继续加载</button>}

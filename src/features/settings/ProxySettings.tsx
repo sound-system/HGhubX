@@ -152,7 +152,7 @@ export default function ProxySettings() {
   </div>;
 
   return <>
-    <Button onClick={openForm} className="w-full flex items-center gap-3 px-3.5 py-3 text-left pressable">
+    <Button onClick={openForm} className="ios-settings-row text-left pressable">
       <span className="ios-setting-icon" aria-hidden="true"><ILink size={16} /></span>
       <div className="flex-1 min-w-0"><div className="text-[14px] text-on">代理访问</div><div className="text-[12px] text-mut truncate">{summary(state, !!loadError)}</div></div>
       <IChevR size={15} className="text-mut" />

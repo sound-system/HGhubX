@@ -13,7 +13,11 @@
 .tv-detail-tags span { font-size: 0.8889rem; line-height: 1.3333rem; border-radius: 0.3333rem; padding: 0.1111rem 0.5rem; background: #182d3e; color: #c5d9e7; }
 .tv-detail-actions { display: flex; flex-wrap: wrap; gap: 0.6667rem; margin-top: 1.1111rem; }
 .tv-detail-episode-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.7778rem; padding: 0.2778rem; }
-.tv-detail-episode-grid button { min-height: 3.1111rem; text-align: left; overflow-wrap: anywhere; }
+/* Every slot keeps one height: short labels, wrapped long titles and the
+   extra "上次观看" line must not stretch a single cell. The label clamps to
+   two lines so no title is silently cut mid-word without an ellipsis. */
+.tv-detail-episode-grid button { height: 4.6667rem; text-align: left; overflow: hidden; display: flex; flex-direction: column; justify-content: center; }
+.tv-detail-episode-grid button > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .tv-detail-episode-grid small { display: block; margin-top: 0.2222rem; color: #8cdbff; font-size: 0.8889rem; }
 .tv-detail-message { padding: 1.3333rem 0; font-size: 1rem; line-height: 1.6; }
 .tv-detail-tag-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6667rem; margin: 1rem 0 1.4444rem; }
@@ -38,7 +42,7 @@
 .tv-player-message p { font-size: 1rem; line-height: 1.5; overflow-wrap: anywhere; }
 .tv-player-message button + button { margin-left: 0.8889rem; }
 .tv-player-parts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.7778rem; padding: 0.2778rem; }
-.tv-player-parts button { min-height: 3.1111rem; overflow-wrap: anywhere; }
+.tv-player-parts button { height: 3.1111rem; overflow: hidden; overflow-wrap: anywhere; }
 .tv-player-options-row { display: flex; flex-wrap: wrap; gap: 0.7778rem; margin: 0.7778rem 0 1.3333rem; }
 .tv-player [aria-pressed="true"], .tv-detail [aria-pressed="true"] { background: #234b67; border-color: #7ed8ff; }
 @media (prefers-reduced-motion: reduce) { .tv-player-surface { transition: none !important; } }

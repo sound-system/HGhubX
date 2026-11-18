@@ -38,8 +38,8 @@
 
 ## 主运行时路径
 
-1. Feed 通过 `api.play(id, ep)` 取得 `streams.main` 或旧字段 `video_url`；
-   `preferHevc` 且存在 `streams.hevc` 时优先 HEVC。播放器拿到的是上游 m3u8，
+1. Feed 通过 `api.play(id, ep)` 取得 `streams.main`、旧字段 `video_url`，或仅存在 HEVC 时的
+   `streams.hevc`/`video_url_hevc` 回退；`preferHevc` 且存在 `streams.hevc` 时优先 HEVC。播放器拿到的是上游 m3u8，
    通过 `playbackSource` 转成 `${LOCAL}/hls?u=...`；已经是 `/hls`、`/seg` 的本地地址
    不会被重复包裹。
 2. `VideoSurface` 在 `Hls.isSupported()` 且不是直通 `/seg` 时创建 hls.js；
@@ -49,8 +49,9 @@
 3. hls.js 使用 `autoStartLoad: false`，在 `MANIFEST_PARSED` 后按
    `startPosition`/`resume` 调 `startLoad`。`FRAG_BUFFERED` 清空恢复计数和错误；
    `ERROR` 只把 fatal network/media 交给 `createHlsRecovery`。
-4. `usePlaybackActivity` 在页面失活时暂停并 `stopLoad()`，在重新激活时按
-   `wanted` 恢复；`play()` 的 Promise 返回后会再次检查页面是否仍激活。
+4. `usePlaybackActivity` 在页面失活时暂停并 `stopLoad()`（处于画中画 `pictureInPictureElement`
+   时保持播放，退出画中画且页面仍失活时再暂停），在重新激活时按 `wanted` 与 `startPosition`
+   恢复；`play()` 的 Promise 返回后会再次检查页面是否仍激活。
 5. seek 有两种入口：桌面 `useSeekInput`/`PlayerControls`，移动端
    `useSeekInput`/进度条手势。指针移动只预览，松手提交一次；
    `VideoSurface.seek` 把目标夹到 `duration - 0.15`（避免 iOS 片尾卡死），
@@ -74,6 +75,14 @@
   “之前自动播放过”强行继续。
 - seek：preview → commit → `seeking` → `seeked`/`playing`；拖动取消、
   页面失活或换源不会提交旧目标。
+- 控件闲置隐藏（`src/features/feed/fsIdle.ts`）：桌面 2.8s（键盘聚焦控件时不隐藏）；
+  移动沉浸全屏按设置 `fsIdleSecs`（`hghubx_app_v1` 内，0/3/5/10 秒，默认 3，0=不自动隐藏），
+  单击画面切换显隐、双击仍是暂停/播放；暂停时不隐藏。CSS 旋转舞台（`.fs-landscape`）上
+  的分区判定/横拖定位/上下划切集/长按换挡都先经 `getHoldPoint` 把屏幕坐标换算回
+  播放器坐标（rotate(90deg)：播放器 x=屏幕 dy、y=屏幕 -dx），长按锁定的命中检测则用
+  顶部倍速胶囊的实时 DOM 矩形（`isInsideHoldTarget`，旋转后同样成立）：手指移动 ≥12px
+  且移入胶囊才提示「松手即可锁定」，松手位置再验一次命中。全屏 overlay 的 touch-action
+  固定为 none，避免原生 pan-y 把视觉横滑取消掉。
 - 媒体错误：hls fatal 显示 `type/details/status`，原生错误走
   `mediaErrorMessage`；手动重试走同一个 `useProxyPlaybackRecovery` 路径。
 
@@ -98,9 +107,8 @@
 
 ```sh
 pnpm build
-pnpm test:playback --scenarios seek,legacy,stall,lifecycle,mms,gesture,proxy,ios-native,recovery,review
+pnpm test:playback --scenarios seek,legacy,lifecycle,gesture,proxy,portrait-fit,ios-native,recovery,review,tv
 node scripts/test-ios-native-media.mjs
-node scripts/test-linux-media-policy.mjs
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 ```
 

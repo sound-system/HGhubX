@@ -1,6 +1,6 @@
 // Actual settings/components/store in Chromium; mocked Tauri IPC, no upstream requests.
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
@@ -16,7 +16,13 @@ try {
   vite = await createServer({ root, server: { host: "127.0.0.1", port: 0, strictPort: false } });
   await vite.listen();
   const origin = vite.resolvedUrls.local[0];
-  browser = await chromium.launch({ headless: true, executablePath: process.env.BROWSER_EXECUTABLE || "/usr/bin/google-chrome" });
+  let executablePath = process.env.BROWSER_EXECUTABLE;
+  if (!executablePath) {
+    for (const candidate of ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"]) {
+      if (await access(candidate).then(() => true, () => false)) { executablePath = candidate; break; }
+    }
+  }
+  browser = await chromium.launch({ headless: true, executablePath });
   async function open({ mobile = false, theme = "dark", width = 375, height = 812 } = {}) {
     const context = await browser.newContext({ viewport: mobile ? { width, height } : { width: 1280, height: 900 }, reducedMotion: "reduce",
       ...(mobile ? { userAgent: "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36" } : {}) });
@@ -227,6 +233,28 @@ try {
     await page.screenshot({ path: join(output, `proxy-${options.theme}-${options.width || 375}.png`), fullPage: true, animations: "disabled" });
     report.passed.push(`Proxy form fits ${options.width || 375}x${options.height || 812} ${options.theme}; long address, reduced motion, scrollable actions and touch targets`);
     assert.deepEqual(await page.evaluate(() => window.networkSettingsFixture.unknown), []);
+    await context.close();
+  }
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    page.on("pageerror", error => report.errors.push(error.message));
+    await page.route("**/*", route => {
+      const target = new URL(route.request().url());
+      if (target.origin === new URL(origin).origin) return route.continue();
+      // html-security.ts rewrites article <img> to the local media loopback (127.0.0.1:17650/img or hg.localhost/img).
+      const isLocalImgProxy = (target.origin === "http://127.0.0.1:17650" || target.hostname === "hg.localhost") && target.pathname === "/img";
+      if (!isLocalImgProxy) report.external.push(route.request().url());
+      return route.abort();
+    });
+    for (const [label, path] of [["HTML sanitizer & SSRF link policy", "tests/html-security.html"], ["Strict security boot & persistence", "tests/security-settings.html"]]) {
+      await page.goto(`${origin}${path}`);
+      await page.waitForFunction(() => (document.querySelector("#results")?.textContent || "").trim().startsWith("{"));
+      const parsed = JSON.parse(await page.locator("#results").innerText());
+      assert.equal(parsed.failed, 0, `${label}: ${JSON.stringify(parsed)}`);
+      assert(parsed.passed > 0, `${label}: expected passing checks`);
+      report.passed.push(`${label}: ${parsed.passed} passed`);
+    }
     await context.close();
   }
   }

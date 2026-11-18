@@ -11,25 +11,27 @@ ad-hoc 签名都不应进入仓库或本机脚本输出。
 ## 事实来源
 
 - 前端脚本与版本：[`package.json`](../../package.json)、[`vite.config.ts`](../../vite.config.ts)、
-  [`tsconfig.json`](../../tsconfig.json)、[`tsconfig.tests.json`](../../tsconfig.tests.json)。
+  [`tsconfig.json`](../../tsconfig.json)、[`tsconfig.node.json`](../../tsconfig.node.json)、
+  [`tsconfig.tests.json`](../../tsconfig.tests.json)。
 - Tauri 配置：[`src-tauri/tauri.conf.json`](../../src-tauri/tauri.conf.json) 的
   `beforeBuildCommand`、`bundle`、`bundle.android.versionCode`；
   [`tauri.macos.conf.json`](../../src-tauri/tauri.macos.conf.json)、
   [`tauri.linux.conf.json`](../../src-tauri/tauri.linux.conf.json)、
-  [`tauri.ios.conf.json`](../../src-tauri/tauri.ios.conf.json)。
+  [`tauri.ios.conf.json`](../../src-tauri/tauri.ios.conf.json)、
+  [`tauri.tv.conf.json`](../../src-tauri/tauri.tv.conf.json)。
 - Rust 版本：[`src-tauri/Cargo.toml`](../../src-tauri/Cargo.toml) 的 `[package].version`、
   `custom-protocol` feature；[`src-tauri/Cargo.lock`](../../src-tauri/Cargo.lock) 的 `hghubx` 包。
-- CI：[`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) 的 `frontend`、`rust`、`smoke`
-  job；[`playback.yml`](../../.github/workflows/playback.yml)；
-  [`build-ios.yml`](../../.github/workflows/build-ios.yml)；
-  [`release.yml`](../../.github/workflows/release.yml) 的 `windows`、`android`、`macos`、`ios`、
-  `linux`、`check`、`release` job。
+- CI/CD（全仓唯一工作流）：[`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)，
+  合并了日常校验（`frontend`、`rust`、`smoke`、`playback` 矩阵）与发版构建（`windows`、
+  `android` 标准/TV 矩阵、`macos`、`ios`、`linux`、`release`），每次事件只产生一条运行记录。
 - 版本/预算门禁：[`scripts/set-version.mjs`](../../scripts/set-version.mjs)、
   [`scripts/check-version-sync.mjs`](../../scripts/check-version-sync.mjs)、
   [`scripts/check-doc-links.mjs`](../../scripts/check-doc-links.mjs)、
   [`scripts/check-size-budgets.mjs`](../../scripts/check-size-budgets.mjs)、
   [`tools/size-budgets.json`](../../tools/size-budgets.json)。
-- iOS 打包：[`scripts/build-ios-unsigned.sh`](../../scripts/build-ios-unsigned.sh)；图标/启动屏：
+- iOS/TV 打包：[`scripts/build-ios-unsigned.sh`](../../scripts/build-ios-unsigned.sh)、
+  [`scripts/build-android-tv.mjs`](../../scripts/build-android-tv.mjs)、
+  [`scripts/patch-android-tv.mjs`](../../scripts/patch-android-tv.mjs)；图标/启动屏：
   `generate-ios-icons.mjs`、`sync-ios-icons.mjs`、`patch-ios-splash.mjs`、
   `sync-android-icons.mjs`、`patch-android-splash.mjs`。
 - 本地入口：[`Makefile`](../../Makefile) 的 `check`、`test-rust`、`test-web`、`test-smoke`、
@@ -38,30 +40,41 @@ ad-hoc 签名都不应进入仓库或本机脚本输出。
 ## 主运行时路径
 
 1. 安装依赖用 `pnpm install --frozen-lockfile`（CI 全部如此）。`pnpm build` 执行
-   `tsc --noEmit`、`tsc --project tsconfig.tests.json`、`vite build`；`vite.config.ts` 从
+   `tsc --noEmit`、`tsc --project tsconfig.node.json`、`tsc --project tsconfig.tests.json`、`vite build`；`vite.config.ts` 从
    `package.json` 注入 `__APP_VERSION__`，避免界面版本写死。
-2. Tauri 构建的 `beforeBuildCommand` 在 Vite 构建后跑图标生成/同步和 Android/iOS 启动屏补丁，
-   再打包 `dist`。桌面入口为 `pnpm tauri build`；开发为 `pnpm tauri dev`。
-3. `make check` 等价于 `test-rust` + `test-web` + `docs` + `budget`：
+   Vite 构建目标是 `["chrome66","safari14.1"]`（CSS 目标 `chrome66/safari13`，Worker 格式
+   `iife` 以兼容无 module worker 的 Chromium 66–79），`cssCodeSplit:false`、`cssMinify:false`；
+   `scripts/legacy-css.ts`（enforce:post）在 generateBundle 阶段对汇总后的 CSS 做旧引擎回退
+   （dvh、color-mix、cascade layers）、追加 `src/styles/legacy-webview.css` 并用 lightningcss
+   压缩。Tailwind 插件以 `optimize:false` 运行，避免其内置优化先吃掉需要降级的语法。TV 构建脚本
+   `build-android-tv.mjs` 复用同一 `pnpm build`，自动获得同一条兼容链。
+2. Tauri 构建的 `beforeBuildCommand` 在 Vite 构建后跑图标生成/同步和 Android 启动屏补丁
+   （iOS 启动屏补丁由 `scripts/build-ios-unsigned.sh` 执行），再打包 `dist`。桌面入口为
+   `pnpm tauri build`；开发为 `pnpm tauri dev`。
+3. `make check` 等价于 `test-rust` + `test-web` + `docs` + `budget` + `release-check`：
+   `cargo check --manifest-path src-tauri/Cargo.toml --all-targets`、
    `cargo test --manifest-path src-tauri/Cargo.toml --lib`、`pnpm build`、
-   `node scripts/check-doc-links.mjs`、`node scripts/check-size-budgets.mjs`。它**不包含**
+   `node scripts/check-doc-links.mjs`、`node scripts/check-size-budgets.mjs`、
+   `node scripts/check-version-sync.mjs`。它**不包含**
    `pnpm test:smoke`；smoke 由 CI 的独立 job 和 `make test-smoke` 执行。
-4. CI `frontend`：Node 22、pnpm 10、`pnpm install --frozen-lockfile`、版本字段检查、文档链接、
-   `pnpm build`、尺寸预算。
-   `rust`：Linux 系统依赖、`cargo check --all-targets`、`cargo test --lib`。
-   `smoke`：安装 Chromium，解析 `BROWSER_EXECUTABLE`，运行 `pnpm test:smoke` 的四个稳定用例。
-5. `playback.yml` 和 `build-ios.yml` 都是 `workflow_dispatch`，不在每个 PR 自动跑。前者需要
-   FFmpeg + Chromium，按 `seek,legacy,stall,lifecycle,mms` 等场景输出诊断；后者只验证 iOS
-   工程能编出未签名 ipa。
-6. `release.yml` 在推送 `v*` tag 或手动触发时运行；在分支上手动运行且 `tag` 留空时，
-   只构建所选范围，不发布 GitHub Release。各平台构建 job 先跑
+4. CI/CD 日常校验（`pull_request`、分支 `push` 或手动 `mode=ci`）：
+   - `frontend`：Node 22、pnpm 10、版本字段检查、文档链接、标准版与 TV 版 `pnpm build`、尺寸预算。
+   - `rust`：Linux 系统依赖、`cargo check --all-targets`、`cargo test --lib`。
+   - `smoke`：安装 Chromium，运行 `pnpm test:smoke`。
+   - `playback`：安装 FFmpeg + Chromium，单次工作流内按矩阵并行执行 `core` 与 `extended`
+     （覆盖 `seek,legacy,lifecycle,gesture,proxy,portrait-fit,ios-native,recovery,review,tv`）；
+     手动 `mode=playback` 可只跑播放诊断或指定 `scenarios` 子集。
+5. CI/CD 打包与发布（推送 `v*` tag 或手动 `mode=package`）：在分支上手动运行且 `tag` 留空时，
+   只构建所选范围（如 `platforms=ios` 仅验证未签名 ipa），不发布 GitHub Release。各平台构建 job 先跑
    `node scripts/set-version.mjs "$V"`：同步 `package.json`、`tauri.conf.json`（含
    `bundle.android.versionCode`）、`Cargo.toml` 和 `Cargo.lock` 的 `hghubx` 版本。
    `versionCode = major*1_000_000 + minor*1_000 + patch`，minor/patch 超过 999 会报错。
-7. 平台产物：
+6. 平台产物：
    - Windows：NSIS 安装包 + `HGhubX_<version>_x64_portable.zip`。
-   - Android：`pnpm tauri android build --apk --split-per-abi`，按 ABI 产出并用 secrets 中的
-     keystore `apksigner` 签名，文件名 `HGhubX_<version>_<abi>.apk`；随后 `aapt2 dump badging`
+   - Android 标准版与 TV 版：`android` 矩阵（`standard` / `tv`）执行 `pnpm tauri android build --apk --split-per-abi`
+     （正式发布编 `aarch64 armv7 x86_64`，`quick` 编 `aarch64 armv7`，显式 `android-arm64` 仅编 `aarch64`），
+     按 ABI 产出并用 secrets 中的 keystore `apksigner` 签名，文件名分别为
+     `HGhubX_<version>_<abi>.apk` 与 `HGhubX-TV_<version>_<abi>.apk`；随后 `aapt2 dump badging`
      打印实际 versionCode。
    - macOS：`quick` 只编 arm64；正式发布编 universal，产物 `HGhubX_<version>_universal.dmg`
      （quick 为 `_arm64.dmg`），ad-hoc 签名。
@@ -69,19 +82,17 @@ ad-hoc 签名都不应进入仓库或本机脚本输出。
      `scripts/build-ios-unsigned.sh <version>`；Xcode `CODE_SIGNING_ALLOWED=NO`，产出
      `HGhubX_<version>_ios.ipa`。
    - Linux：`pnpm tauri build` 产出 deb，文件名 `HGhubX_<version>_amd64.deb`。
-8. `release` job 依赖五个平台 job，以 `always()` 等待它们结束；发布条件是 `v*` tag ref，
-   或手动触发且 `tag` 非空，条件中没有限制 `platforms=all` 或 `quick=false`。
-   它下载已有 artifact，用 `softprops/action-gh-release` 上传 `artifacts/*`；
-   如果存在 `docs/release-notes/<tag>.md` 就作为正文，否则自动生成说明。`fail_on_unmatched_files`
-   为 true，没有匹配产物时失败，但不保证五个平台的产物全部存在。
-9. `check` job 只做编译/类型检查/单测，不产包；手动 `platforms=check` 是最快的“能不能编”验证。
+7. `release` job 依赖五个平台构建 job（其中 `android` 矩阵覆盖标准版与 TV 版），在 `!cancelled()` 且
+   `windows`、`android`、`macos`、`linux` 全部成功（`ios` 允许成功或失败）时执行；发布条件是 `v*` tag ref，
+   或手动 `mode=package` 且 `tag` 非空、`platforms=all`、`quick=false`。它下载已有 artifact，用
+   `softprops/action-gh-release` 上传 `artifacts/*`；如果存在 `docs/release-notes/<tag>.md` 就作为正文，
+   否则开启 `generate_release_notes` 自动生成说明。
 
 ## 状态转换
 
 - 版本：源版本（tag 或 `tauri.conf.json`）→ `set-version.mjs` 校验 `major.minor.patch` →
-  写四份文件 → 平台构建。`check-version-sync.mjs` 由常规 CI 的 `frontend` job 调用，
-  不在当前 release workflow 中；它要求四处版本字符串一致，并检查 Android `versionCode`
-  为正整数，没有校验该值与版本号公式是否一致。
+  写四份文件 → 平台构建。`check-version-sync.mjs` 由 `ci.yml` 的 `frontend` job 调用；
+  它要求四处版本字符串一致，并检查 Android `versionCode` 与公式推导值一致。
 - Android versionCode：版本号解析 → `major*1e6 + minor*1e3 + patch` → 写入
   `bundle.android.versionCode` → APK 签名 → `aapt2` 复核。
 - iOS：`ios init` 生成工程 → 补 plist → 启动 Tauri options server → Xcode release 构建 →
@@ -121,5 +132,5 @@ node scripts/check-version-sync.mjs
 ```
 
 `make check` 不包含 smoke；需要浏览器用例时单独 `pnpm test:smoke`。`pnpm test:playback` 需要
-FFmpeg/Chromium，`build-ios.yml` 需要 macOS runner。报告里必须写清命令、版本/输入、字面结果和
-退出状态；没有运行的命令不能写成“已通过”。
+FFmpeg/Chromium，iOS 打包校验通过 `ci.yml`（`mode=package, platforms=ios`）在 macOS runner 执行。
+报告里必须写清命令、版本/输入、字面结果和退出状态；没有运行的命令不能写成“已通过”。

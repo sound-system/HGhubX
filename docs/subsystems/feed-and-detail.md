@@ -11,8 +11,12 @@ Feed 负责列表播放页的条目位置、详情/帖子读取、标签门、�
 
 - [`src/features/feed/Feed.tsx`](../../src/features/feed/Feed.tsx)：`requestPlay`、
   `useFeedDetails` 的调用、`tagKey`/`permissionKey`、`effectiveVideoIds`、
-  `details`/`posts`、`relatedByVideo`、`actionContext`、`actionIsCurrent`、
-  `onLike`/`onFav`/`onFollow`、桌面 dock 与移动 Sheet。
+  `details`/`posts`、`relatedByVideo`、`actionContext`；视口/手势/动作与界面覆盖层分别位于同目录的
+  [`useFeedViewport.ts`](../../src/features/feed/useFeedViewport.ts)、
+  [`useFeedTouchGestures.ts`](../../src/features/feed/useFeedTouchGestures.ts)、
+  [`useFeedActions.ts`](../../src/features/feed/useFeedActions.ts)、
+  [`FeedItemChrome.tsx`](../../src/features/feed/FeedItemChrome.tsx)、
+  [`FeedPlayerShellChrome.tsx`](../../src/features/feed/FeedPlayerShellChrome.tsx)。
 - [`src/features/feed/useFeedDetails.ts`](../../src/features/feed/useFeedDetails.ts)：
   `detailRequests`、`requestDetail`、`effectiveVideoIds`、`detailsRef`。
 - [`src/features/feed/Panels.tsx`](../../src/features/feed/Panels.tsx) 的
@@ -47,7 +51,8 @@ Feed 负责列表播放页的条目位置、详情/帖子读取、标签门、�
 7. `requestPlay(id, episode)` 的 key 是
    `` `${accountScope}:${lineEpoch}:${id}:${episode}` ``，最多缓存 12 个 Promise。
    当前集开始播放后，才预取下一集的地址；下一部视频还要先通过详情/标签检查。
-8. 评论面板使用 `api.comments` 或 `api.postComments`，选集使用当前 `detail.episodes`，
+8. 评论面板使用 `api.comments` 或 `api.postComments`（仅短剧开放评论发送，帖子评论只读，
+   不向短剧接口串写），选集使用当前 `detail.episodes`，
    详情面板显示作者/标签/相关推荐。桌面端停靠 `desktop-dock-panel`，移动端使用
    `Sheet`；面板本身不在 Feed 之外维护第二套详情缓存。
 9. 相关推荐只在 `panel === "detail"` 时调用 `api.related`，缓存键是
@@ -91,11 +96,9 @@ Feed 负责列表播放页的条目位置、详情/帖子读取、标签门、�
 pnpm build
 pnpm test:smoke
 pnpm test:api-loading
-pnpm test:channel-pagination
-pnpm test:topic-pagination
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 ```
 
 `test:smoke` 当前包含 `api-loading`、`storage-migration`、`line-selection`、
-`diagnostic-copy`；分页脚本单独运行。浏览器 fixture 使用 mock Tauri IPC 且阻断外部请求，
+`diagnostic-copy`。浏览器 fixture 使用 mock Tauri IPC 且阻断外部请求，
 不能证明真实上游的正文结构或账号接口；真实接口变化需要另加网络隔离的 fixture 或手动验证。

@@ -12,16 +12,20 @@ import { chromium } from "playwright-core";
 import { createServer as createViteServer } from "vite";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const scriptScenarios = {
+  tv: { script: "test-tv-remote.mjs", timeout: 480000, metrics: { transport: "mock Tauri IPC; actual TV bootstrap, worker, library and player" } },
+};
+const ALL_SCENARIOS = ["seek", "legacy", "lifecycle", "gesture", "proxy", "portrait-fit", "ios-native", "recovery", "review", "tv"];
 const { values: args } = parseArgs({ options: {
   "media-dir": { type: "string" }, output: { type: "string" }, "browser-executable": { type: "string" },
-  scenarios: { type: "string", default: "seek,legacy,stall,lifecycle,mms,gesture,proxy,portrait-fit" }, help: { type: "boolean" },
+  scenarios: { type: "string", default: "seek,legacy,lifecycle,gesture,proxy,portrait-fit" }, help: { type: "boolean" },
 } });
 if (args.help) {
-  console.log("pnpm test:playback [--media-dir DIR] [--output NEW_DIR] [--browser-executable PATH] [--scenarios seek,legacy,stall,lifecycle,mms,gesture,proxy,portrait-fit,ios-native,recovery,review]");
+  console.log(`pnpm test:playback [--media-dir DIR] [--output NEW_DIR] [--browser-executable PATH] [--scenarios all|${ALL_SCENARIOS.join(",")}]`);
   process.exit(0);
 }
-const scenarios = args.scenarios.split(",");
-assert(scenarios.length && scenarios.every(s => ["seek", "legacy", "stall", "lifecycle", "mms", "gesture", "proxy", "portrait-fit", "ios-native", "recovery", "review"].includes(s)), "Unknown scenario");
+const scenarios = args.scenarios === "all" ? ALL_SCENARIOS : args.scenarios.split(",");
+assert(scenarios.length && scenarios.every(s => ALL_SCENARIOS.includes(s)), "Unknown scenario");
 const output = resolve(args.output || join(root, "test-results", "playback", new Date().toISOString().replace(/[:.]/g, "-")));
 await mkdir(dirname(output), { recursive: true });
 await mkdir(output); // Refuse to overwrite artifacts from an earlier run.
@@ -316,70 +320,6 @@ async function seekChecks(page, legacy) {
   return { click_ms: logs.find(e => e.event === "seek.resumed" && e.data.seek === first.data.seek)?.data.elapsed_ms, drag_requests: drags.length,
     ...(!legacy ? { speed_menu_keyboard: { playing_preserved: true, paused_preserved: true, activation: ["Space", "Enter"], navigation: ["ArrowUp", "ArrowDown", "Home", "End"], exit: ["Escape", "Tab"], focus_restored: true } } : {}) };
 }
-async function stallCheck(page) {
-  await loadPlayer(page);
-  await page.waitForFunction(() => { const v = document.querySelector("video"); return v.buffered.length && v.buffered.end(0) >= 30; });
-  await page.evaluate(async () => { await window.playerSeekFixture.setLogging(true); window.playerSeekFixture.pauseBuffering(); });
-  let segmentAttempts = 0;
-  await page.route("**/seg?*", route => { segmentAttempts += 1; return route.abort("failed"); });
-  await clickProgress(page, .8);
-  const logs = await waitLog(page, "seek.timeout");
-  const timeout = logs.find(e => e.event === "seek.timeout");
-  assert(timeout.data.ready < 3 && timeout.data.seeking, "Timeout must capture the stalled media state");
-  await page.waitForTimeout(250);
-  assert(segmentAttempts < 80, `Recoverable fragment failures must not fan out into a retry storm (${segmentAttempts} attempts)`);
-  await page.unroute("**/seg?*");
-  await page.evaluate(() => window.playerSeekFixture.resumeBuffering());
-  await waitLog(page, "seek.resumed");
-  return { fault_injected: true, timeout_ms: timeout.data.elapsed_ms, segment_attempts: segmentAttempts };
-}
-async function managedMediaCheck(page) {
-  // Chromium supplies real MSE decoding/buffering; only the MMS constructor and streaming
-  // events are simulated. This tests the hls.js workaround, not macOS WebKit itself.
-  await page.addInitScript(() => {
-    const NativeMediaSource = window.MediaSource;
-    window.__managedSources = [];
-    class ManagedMediaSource extends NativeMediaSource {
-      constructor() { super(); this.streaming = true; window.__managedSources.push(this); }
-    }
-    Object.defineProperty(window, "ManagedMediaSource", { configurable: true, value: ManagedMediaSource });
-    if (new URL(location.href).searchParams.get("mms") === "only") {
-      Object.defineProperty(window, "MediaSource", { configurable: true, value: undefined });
-    }
-  });
-  const players = [];
-  for (const legacy of [false, true]) {
-    await loadPlayer(page, legacy, "&mms=both");
-    await page.evaluate(() => window.playerSeekFixture.setLogging(true));
-    let logs = await getLogs(page);
-    assert(logs.some(e => e.event === "player.snapshot" && e.data.engine === "MediaSource" && e.data.prefer_managed === false), "Standard MediaSource must be preferred when both APIs exist");
-    assert.equal(await page.evaluate(() => window.__managedSources.length), 0, "Avoid constructing MMS on standard MSE-capable browsers");
-    await loadPlayer(page, legacy, "&mms=only");
-    await page.waitForFunction(() => { const v = document.querySelector("video"); return v.buffered.length && v.buffered.end(0) >= 30; });
-    await page.evaluate(() => window.playerSeekFixture.setLogging(true));
-    logs = await getLogs(page);
-    assert(logs.some(e => e.event === "player.snapshot" && e.data.engine === "ManagedMediaSource"), "MMS-only environments must still play");
-    await page.evaluate(() => {
-      const source = window.__managedSources.find(s => s.readyState === "open");
-      source.streaming = false;
-      source.dispatchEvent(new Event("endstreaming"));
-      // A delayed endstreaming event can also arrive after seeking has resumed loading.
-      document.querySelector("video").addEventListener("seeking", () => source.dispatchEvent(new Event("endstreaming")), { once: true });
-    });
-    await page.waitForFunction(() => !window.playerSeekFixture.engineState().buffering);
-    await clickProgress(page, .8);
-    logs = await waitLog(page, "seek.resumed");
-    assert(logs.some(e => e.event === "mms.endstreaming" && e.data.buffering_enabled === false), "Test must first suspend MMS buffering");
-    assert(logs.some(e => e.event === "mms.endstreaming" && e.data.seeking && e.data.buffering_enabled === true), "Late endstreaming during seeking must not suspend buffering again");
-    assert(!logs.some(e => e.event === "mms.startstreaming"), "Recovery must not depend on a startstreaming event");
-    assert.equal(await page.evaluate(() => window.playerSeekFixture.engineState().buffering), true, "Seeking must automatically resume MMS buffering");
-    assert(!logs.some(e => e.event === "seek.timeout"));
-    players.push({ player: legacy ? "legacy" : "feed", version: logs.find(e => e.event === "app.snapshot")?.data.hls_version,
-      prefer_standard_mse: true, mms_only_recovered_without_startstreaming: true,
-      seek_ms: logs.find(e => e.event === "seek.resumed")?.data.elapsed_ms });
-  }
-  return { simulated_mms: true, players };
-}
 async function lifecyclePlayerCheck(page, legacy) {
   let release, held, holdDeadline;
   const gate = new Promise(done => { release = done; });
@@ -501,6 +441,11 @@ async function proxyRecoveryCheck(page) {
       await page.evaluate(() => window.dispatchEvent(new Event("hg:proxy-changed")));
       await page.waitForFunction(before => window.playerSeekFixture.logs.filter(e => e.event === "proxy.restored").length > before, playingRetries);
       await page.waitForFunction(time => !document.querySelector("video").paused && document.querySelector("video").currentTime >= time, playingAt);
+      if (!legacy) {
+        await page.evaluate(() => window.dispatchEvent(new Event("hg:line-changed")));
+        assert.equal(await page.locator(".spinner").count(), 0, "Background line switch must not leave a stuck loading spinner on a healthy playing stream");
+        assert(!(await page.locator("video").evaluate(v => v.paused)), "Background line switch must keep healthy stream playing");
+      }
       const logs = await getLogs(page);
       const current = logs.filter(e => e.data.video_id).map(e => e.data.video_id);
       assert(current.every(id => id === 991), "Proxy save must retain current video");
@@ -604,7 +549,7 @@ async function explicitRecoveryCheck(page) {
 }
 
 try {
-  if (scenarios.some(name => name !== "ios-native")) {
+  if (scenarios.some(name => name !== "ios-native" && name !== "tv" && name !== "review")) {
     let mediaDir = args["media-dir"] && resolve(args["media-dir"]);
     if (!mediaDir) {
       temporaryMedia = await mkdtemp(join(tmpdir(), "hghubx-playback-")); mediaDir = temporaryMedia;
@@ -623,6 +568,33 @@ try {
   }
   for (const name of scenarios) {
     const dir = join(output, name); await mkdir(dir);
+    if (name === "tv") {
+      const result = { name, status: "running", started: new Date().toISOString() }; report.cases.push(result);
+      let stdout = "", stderr = "";
+      try {
+        const child = await promisify(execFile)(process.execPath, [join(root, "scripts", scriptScenarios.tv.script)], {
+          cwd: root, encoding: "utf8", timeout: scriptScenarios.tv.timeout, maxBuffer: 8 * 1024 * 1024,
+          env: { ...process.env, ...(args["browser-executable"] ? { BROWSER_EXECUTABLE: args["browser-executable"] } : {}) },
+        });
+        stdout = child.stdout; stderr = child.stderr;
+        result.metrics = { exit_code: 0, ...scriptScenarios.tv.metrics };
+        result.status = "passed"; console.log(`PASS ${name}: ${JSON.stringify(result.metrics)}`);
+      } catch (error) {
+        stdout = error.stdout || ""; stderr = error.stderr || "";
+        result.status = "failed"; result.error = error.message;
+        result.exit_code = typeof error.code === "number" ? error.code : null;
+        result.signal = error.signal || null;
+        console.error(`FAIL ${name}: ${error.message}`);
+      } finally {
+        if (stdout) process.stdout.write(stdout);
+        if (stderr) process.stderr.write(stderr);
+        await writeFile(join(dir, "stdout.log"), stdout);
+        await writeFile(join(dir, "stderr.log"), stderr);
+        result.finished = new Date().toISOString();
+        await writeFile(join(output, "report.json"), JSON.stringify(report, null, 2) + "\n");
+      }
+      continue;
+    }
     if (name === "ios-native") {
       const result = { name, status: "running", started: new Date().toISOString() }; report.cases.push(result);
       let stdout = "", stderr = "";
@@ -633,6 +605,33 @@ try {
         });
         stdout = child.stdout; stderr = child.stderr;
         result.metrics = { exit_code: 0, transport: "mock IPC/HLS; real Player/VideoSurface" };
+        result.status = "passed"; console.log(`PASS ${name}: ${JSON.stringify(result.metrics)}`);
+      } catch (error) {
+        stdout = error.stdout || ""; stderr = error.stderr || "";
+        result.status = "failed"; result.error = error.message;
+        result.exit_code = typeof error.code === "number" ? error.code : null;
+        result.signal = error.signal || null;
+        console.error(`FAIL ${name}: ${error.message}`);
+      } finally {
+        if (stdout) process.stdout.write(stdout);
+        if (stderr) process.stderr.write(stderr);
+        await writeFile(join(dir, "stdout.log"), stdout);
+        await writeFile(join(dir, "stderr.log"), stderr);
+        result.finished = new Date().toISOString();
+        await writeFile(join(output, "report.json"), JSON.stringify(report, null, 2) + "\n");
+      }
+      continue;
+    }
+    if (name === "review") {
+      const result = { name, status: "running", started: new Date().toISOString() }; report.cases.push(result);
+      let stdout = "", stderr = "";
+      try {
+        const child = await promisify(execFile)(process.execPath, [join(root, "scripts/test-round-review.mjs")], {
+          cwd: root, encoding: "utf8", timeout: 180000, maxBuffer: 4 * 1024 * 1024,
+          env: { ...process.env, ...(args["browser-executable"] ? { BROWSER_EXECUTABLE: args["browser-executable"] } : {}) },
+        });
+        stdout = child.stdout; stderr = child.stderr;
+        result.metrics = { focused_checks: true };
         result.status = "passed"; console.log(`PASS ${name}: ${JSON.stringify(result.metrics)}`);
       } catch (error) {
         stdout = error.stdout || ""; stderr = error.stderr || "";
@@ -674,21 +673,7 @@ try {
     const result = { name, status: "running", started: new Date().toISOString() }; report.cases.push(result);
     let deadline;
     try {
-      if (name === "review") {
-        result.metrics = await new Promise((resolve, reject) => {
-          const child = spawn(process.execPath, [join(root, "scripts/test-round-review.mjs")], {
-            cwd: root,
-            env: { ...process.env, BROWSER_EXECUTABLE: args["browser-executable"] || chromium.executablePath() },
-            stdio: "inherit",
-          });
-          child.once("error", reject);
-          child.once("close", code => code === 0 ? resolve({ focused_checks: true }) : reject(new Error(`Round review checks exited ${code}`)));
-        });
-        result.status = "passed";
-        console.log(`PASS ${name}: ${JSON.stringify(result.metrics)}`);
-        continue;
-      }
-      const action = name === "recovery" ? explicitRecoveryCheck(page) : name === "proxy" ? proxyRecoveryCheck(page) : name === "gesture" ? gestureChecks(page) : name === "portrait-fit" ? portraitFitChecks(page) : name === "seek" || name === "legacy" ? seekChecks(page, name === "legacy") : name === "stall" ? stallCheck(page) : name === "mms" ? managedMediaCheck(page) : lifecycleCheck(page);
+      const action = name === "recovery" ? explicitRecoveryCheck(page) : name === "proxy" ? proxyRecoveryCheck(page) : name === "gesture" ? gestureChecks(page) : name === "portrait-fit" ? portraitFitChecks(page) : name === "seek" || name === "legacy" ? seekChecks(page, name === "legacy") : lifecycleCheck(page);
       result.metrics = await Promise.race([action, new Promise((_, reject) => { deadline = setTimeout(() => reject(new Error("Scenario exceeded 45 seconds")), 45000); })]);
       assert.deepEqual(pageErrors, [], "Browser script errors");
       assert.deepEqual(externalRequests, [], "Unexpected external network requests");

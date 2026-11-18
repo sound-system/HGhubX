@@ -22,11 +22,10 @@ origin”，不负责 HTTP 客户端、代理、DNS 固定或媒体字节（见
   `trusted_auth_origin()`、`persisted_line()`、`bind_base()`、`set_base()`、
   `set_custom_base()`、`save_line()`、`apply_base()`。
 - 固定线路与发布页：[`src-tauri/src/lines/mirror.rs`](../../src-tauri/src/lines/mirror.rs) 的
-  `FIXED`、`PUBLISH_PAGES`、`MIRROR_MAX`、`mirrors()`、`merge_publishers()`、
-  `parse_mirrors()`、`script_src()`、`absolute()`、`remember_published()`、
+  `FIXED`、`PUBLISH_PAGES`、`mirrors()`、`merge_publishers()`、`remember_published()`、
   `is_trusted_mirror()`、`is_fixed()`、`verify_published_origin()`。
-- JS-as-data 解析：[`src-tauri/src/lines/jsparse.rs`](../../src-tauri/src/lines/jsparse.rs) 的
-  `js_tokens()`、`js_string()`、`js_array()`。
+- 发布脚本与 JS-as-data 解析：[`src-tauri/src/publish_parser.rs`](../../src-tauri/src/publish_parser.rs) 的
+  `MIRROR_MAX`、`parse_mirrors()`、`script_src()`、`absolute()`、`js_tokens()`、`js_string()`、`js_array()`。
 - 探测与选择：[`src-tauri/src/lines/probe.rs`](../../src-tauri/src/lines/probe.rs) 的
   `healthy_video_data()`、`probe_hit()`、`probe()`、`auto_candidates()`、`pick_from_hits()`、
   `auto_pick()`、`try_main()`、`health()`。
@@ -71,9 +70,9 @@ origin”，不负责 HTTP 客户端、代理、DNS 固定或媒体字节（见
 8. 当前是镜像时，健康检查会调用 `line_try_main()`：只探固定线路 1，通了就切回，代价是一个
    请求；两端可信时会话经 rebase 保留，旧 origin 不可信（如自定义线路）则清空。切回后
    `hg:line-changed` 让列表和详情按新 `lineEpoch` 重新读取。`line_auto` 落盘切换时同样执行
-   rebase-or-clear；`app_boot` 在当前 origin 查不到会话、但存有旧 origin 会话时，先做
-   `verify_published_origin()` 可信刷新（填充 `TRUSTED_MIRRORS`），再尝试 rebase，覆盖
-   重启后 `line.json` 已是新线路的场景。
+   rebase-or-clear；`app_boot` 在当前 origin 查不到会话、但存有旧 origin 会话时，同时对旧 origin
+   与当前 origin 做 `verify_published_origin()` 可信刷新（填充 `TRUSTED_MIRRORS`），再尝试 rebase，覆盖
+   镜像登录后重启回固定线路或切新镜像的场景。
 9. 带 token 的业务请求在严格模式下还要过 `trusted_auth_origin()`：固定线路、本次进程内由发布页
    确认过的镜像，或用户显式保存的自定义线路。已落盘但尚未验证的镜像会触发
    `verify_published_origin()`；验证失败只允许游客浏览，登录/注册被拒绝。
@@ -115,6 +114,6 @@ node scripts/test-line-selection.mjs
 pnpm test:smoke
 ```
 
-`src-tauri/src/lines/mod.rs` 的单元测试覆盖脚本词法、域名规范化、发布页同源、交错合并、
+`src-tauri/src/publish_parser.rs` 与 `src-tauri/src/lines/mod.rs` 的单元测试覆盖脚本词法、域名规范化、发布页同源、交错合并、
 all-down、健康判据和候选排序；`test-line-selection` 覆盖前端自动选线状态。
 发布页和真实镜像的可达性属于外部状态，测试不请求上游网络；实机结果需单独记录。

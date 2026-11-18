@@ -15,8 +15,8 @@ loopback、Windows 的自定义标题栏与注册表代理判断、Android 的 W
 - 模块注册与启动：[`src-tauri/src/lib.rs`](../../src-tauri/src/lib.rs) 的 `mod` 列表、
   `media_http_origin`、`allowed_dev_host`、`allowed_frontend_origin`、`run()` 的
   `on_page_load`/`setup`、`generate_handler!`。
-- iOS 布局：[`src-tauri/src/ios_layout.rs`](../../src-tauri/src/ios_layout.rs) 的 `apply()`、
-  `set_text_interaction_on_webview()`；原生媒体服务：
+- iOS 布局与方向：[`src-tauri/src/ios_layout.rs`](../../src-tauri/src/ios_layout.rs) 的 `apply()`、
+  `set_text_interaction_on_webview()`、`request_orientation()`；原生媒体服务：
   [`src-tauri/src/ios_media_http.rs`](../../src-tauri/src/ios_media_http.rs) 的 `origin()`、
   `start()`、`Endpoint`、`parse_request()`、`app_origin()`、`MAX_CONNECTIONS`。
 - macOS 标题栏：[`src-tauri/src/macos_titlebar.rs`](../../src-tauri/src/macos_titlebar.rs) 的
@@ -74,8 +74,9 @@ loopback、Windows 的自定义标题栏与注册表代理判断、Android 的 W
 1. WebKitGTK 4.1 默认没有 MediaSource，hls.js 用不上；`<video>` 交给 GStreamer，而 GStreamer
    不认 `hg://`。`setup` 调 `linux_http::start()`，在 `127.0.0.1:17650` 起一个只服务
    `/img`、`/hls`、`/seg` 的 HTTP 代理。
-2. `linux_http::serve()` 只接受 `GET/HEAD`，单线程处理每个连接，读/写超时 30 秒；只处理
-   单个、无 `If-Range` 的 `Range`，HEAD 保留表示长度但不发 body。响应头只保留一份
+2. `linux_http::serve()` 只接受 `GET/HEAD` 且要求唯一合法 `Host` 与至多一个合法 `Origin`，
+   单线程处理每个连接，读/写超时 30 秒；只处理单个、无 `If-Range` 的 `Range`，
+   HEAD（含错误响应）保留表示长度但不发 body。响应头只保留一份
    `Content-Length`/CORS，并强制 `Connection: close`。
 3. `linux_webview::configure()` 在 WebKit 的 `WebsiteDataManager` 上设置 `NoProxy`。API/CDN
    仍由 Rust 按用户代理访问；这只防止 127.0.0.1 媒体请求被 GNOME 代理二次转发。
@@ -112,6 +113,22 @@ loopback、Windows 的自定义标题栏与注册表代理判断、Android 的 W
    覆盖层卸载时释放（引用计数 + 幂等释放，StrictMode 安全）。动画结束后只剩 App 监听，
    顺序恢复为 面板/弹层 → 全屏 → 登录框 → 页面栈 → 回首页 → 退出。未同意首启不持门。
    TV 版走 `registerBack`（remote.ts 的 scope 分发），不经 `runBack()`，门对 TV 无影响。
+6. 老 WebView（Chromium 66 车机/电视、旧 iOS WKWebView）启动支持分三层：
+   `index.html` 内嵌 ES5 启动看门狗（模块图之外的 error/unhandledrejection 监听 +
+   15s 超时，失败渲染可复制诊断的 `#hg-startup-error` 面板）；`src/legacyRuntime.ts`
+   补 `globalThis`/`Object.fromEntries`/`Promise.allSettled`/`flat(Map)`/`queueMicrotask`/
+   `matchMedia.addEventListener`/`ResizeObserver` 等运行时 API，并探测 flex-gap 写
+   `data-legacy-flex-gap`；构建层 `vite.config.ts` 以 `chrome66/safari14.1` 为语法目标，
+   `scripts/legacy-css.ts` 在 CSS 汇总后做 dvh/color-mix 回退、postcss-preset-env 降级与
+   lightningcss 压缩，并追加 `src/styles/legacy-webview.css` 的几何回退。标准入口
+   `src/main.tsx` 与 TV 入口 `src/tv/bootstrap.tsx` 都在首个成功 commit 调
+   `markStartupReady()` 解除看门狗；协议未签署不算启动失败。
+7. 冷启动无闪烁链路：原生窗口/系统启动屏（`tauri.conf.json`、`patch-android-splash.mjs`、
+   `patch-ios-splash.mjs`）、`index.html` 的 `html[data-hg-launching]` 背景锁与 `.hg-launch`
+   统一固定为 `#071218`，阻止外链 CSS 在 React 挂载前把 `body` 刷成亮色 `#eeece7` 或暗灰底。
+   `StartupGate` 首帧独占提交合成线程动画，下一帧再并发挂载已分离 `Feed`/`hls.js` 的业务壳，
+   待入场时间满足且底层界面提交（`contentReady` 或超时兜底）后再释放 `data-hg-launching`、同步
+   `meta[name="theme-color"]` 并淡出覆盖层。
 
 ## 状态转换
 
@@ -145,9 +162,6 @@ loopback、Windows 的自定义标题栏与注册表代理判断、Android 的 W
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 pnpm build
 node scripts/test-ios-native-media.mjs
-node scripts/test-linux-media-policy.mjs
-node scripts/test-mobile-layout.mjs
-node scripts/test-ios-ui.mjs
 ```
 
 单元测试覆盖 macOS 红绿灯居中、Apple 代理匹配、Linux 响应头/HEAD、iOS 请求校验和媒体

@@ -26,7 +26,7 @@ make check
 
 - `pnpm build` 执行两份 TypeScript 检查和 Vite 构建。
 - `pnpm test:smoke` 运行不需要 ffmpeg、真实 Tauri 宿主或上游网络的稳定浏览器用例。
-- `make check` 当前执行 `test-rust`、`test-web`、`docs`、`budget`；**不包含** `test:smoke`。
+- `make check` 当前执行 `test-rust`、`test-web`、`docs`、`budget`、`release-check`；**不包含** `test:smoke`。
 - `make release-check` 检查版本字段和 Android `versionCode`；发版由 CI 执行，不在本地发布。
 - 完整播放回归用 `pnpm test:playback`；它需要 FFmpeg 和 Chromium，属于手动诊断而非 PR smoke。
 
@@ -36,11 +36,12 @@ CI 是验证记录。命令写了不等于已经运行；报告里必须写清�
 
 ### 前端
 
-- `src/main.tsx`：挂载 React、启动诊断，并在使用协议确认后装配应用 Provider 和自动选线。
+- `src/editionEntry.ts`、`src/legacyRuntime.ts`、`src/main.tsx`：加载旧版 WebView 垫片，按构建变体挂载标准版或 `src/tv/`（Android TV 版），并在使用协议确认后装配应用 Provider 和自动选线。
 - `src/app/`：`App.tsx` 负责页面栈、桌面/移动布局和全局交互；`shell/` 放窗口控件，
   `startup/` 放启动门。
 - `src/features/`：按 `account/category/discover/feed/playback/posts/search/settings` 归组页面、
   专属组件与 hooks。Feed 的详情/评论/选集面板、设置页的线路/代理控件都随功能放置。
+- `src/tv/`：独立 Android TV 版页面、焦点导航、本地片库与播放界面。
 - `src/shared/`：`api`（IPC 与响应类型）、`model`（应用/账号/内容偏好状态）、`network`（自动选线）、
   `storage`（存储键与协议版本）、`diagnostics`、`lib`、`ui`（跨功能控件）。
 - `src/shared/model/store.tsx` 仍聚合导航、账号与播放偏好；这次目录迁移没有拆 Provider。
@@ -52,12 +53,11 @@ CI 是验证记录。命令写了不等于已经运行；报告里必须写清�
 
 ### Rust
 
-- `src-tauri/src/api/`：Tauri command 与上游 endpoint，按 account/feed/video/interact/update/platform/lines 分文件。
+- `src-tauri/src/api/`：Tauri command 与上游 endpoint，按 account/feed/video/interact/update/platform/lines 分文件；GitHub Release 更新检查与版本对比在 `updater.rs`。
 - `src-tauri/src/net/`：`line`（线路状态）、`proxy_env`、`client`（客户端缓存/DNS/GET）、
-  `redact`、`diagnostics`、`edge`（信封/重试/字节下载）；共享 statics 和测试在 `mod.rs`/`tests.rs`。
+  `redact`、`edge`（信封/重试/字节下载）；网络诊断与草稿代理探测在 `net_diag.rs`；共享 statics 和测试在 `mod.rs`/`tests.rs`。
 - `src-tauri/src/media/`：图片、HLS、分片、Range、响应整形和本地媒体协议入口。
-- `src-tauri/src/lines/`：`mirror`、`jsparse`、`probe` 三块，负责固定/发布镜像/自定义线路、
-  JS-as-data 解析、探测与自动选线。
+- `src-tauri/src/lines/`：`mirror`、`probe` 负责固定/发布镜像/自定义线路、探测与自动选线；无状态发布页与 JS-as-data 解析在 `publish_parser.rs`。
 - `src-tauri/src/ios_layout.rs`、`ios_media_http.rs`、`linux_http.rs`、`linux_webview.rs`、
   `macos_titlebar.rs`：按 `cfg` 编译的平台壳；Windows/Android 的壳逻辑部分在 `lib.rs` 与前端。
 - `src-tauri/src/session.rs`、`cache.rs`、`env.rs`、`playback_log.rs`、`network_policy.rs`：
@@ -91,6 +91,10 @@ CI 是验证记录。命令写了不等于已经运行；报告里必须写清�
    上游网络，fixture 要接近真实响应；尺寸预算只能在搬走关注点后下调。
 10. **日志不含秘密。** 不记录 token、Cookie、代理认证、播放直链、查询参数或密钥内容；
     错误链由 `err_text`/`redact_error_proxy_auth` 脱敏，诊断只输出协议/主机/端口和固定资源编号。
+11. **新增测试必须先经维护者同意。** 任何新增测试文件、场景或用例，先向维护者说明
+    它验证什么、为什么现有测试覆盖不了，得到明确同意后才能加入。既有测试的断言适配
+    （契约变化导致的 fixture/断言更新）不算新增，但不得借适配削弱覆盖。测试体系保持
+    最精简：一个契约一个回归，不重复建同义用例。
 
 ## 变更协议
 

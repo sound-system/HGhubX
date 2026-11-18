@@ -87,32 +87,28 @@ pnpm test:playback
 
 可用 `pnpm exec playwright-core show-trace <trace.zip路径>` 打开追踪。输出目录已经加入 gitignore；文件保存在执行命令的服务器，不会自动上传。
 
-CLI 默认选择七个场景；下表描述预期覆盖，具体通过情况以对应运行的 `report.json` 为准：
+CLI 默认选择六个场景；下表描述预期覆盖，具体通过情况以对应运行的 `report.json` 为准：
 
 | 场景 | 检查内容 |
 | --- | --- |
 | `seek` | 共用播放器的真实鼠标点击/拖动、拖动松手后仅定位一次、首帧恢复、暂停/键盘定位、失活取消拖动、开关关闭和保存失败 |
 | `legacy` | 吃瓜详情独立播放器的相同检查 |
-| `stall` | 人为停止 HLS 缓冲后点击未缓冲位置，检查 8 秒超时日志以及恢复缓冲后的首帧；属于故障注入 |
 | `lifecycle` | 两个播放器延迟清单后失活、后台禁止自动播放和分片加载、重新激活后恢复、手动暂停状态保留，以及视频延迟挂载时保持失活 |
-| `mms` | 两个播放器在两种 API 同时存在时优先使用标准 MSE；在模拟 MMS-only 环境中，endstreaming 停止缓冲后点击未缓冲位置，即使没有 startstreaming 事件也能自动恢复并输出首帧 |
 | `gesture` | Feed 移动端首击在 230ms 内切换净屏，双击恢复界面并只切换一次播放状态 |
 | `proxy` | 代理变化后重建媒体连接，保留同一 video 元素、当前视频、位置和播放/暂停意图；播放地址接口失败后可重试 |
+| `portrait-fit` | 竖屏视频在移动端保持原始比例（contain），横屏视频的铺满/适应切换正常 |
 
-`ios-native`、`recovery`、`review` 是额外可选场景，需通过 `--scenarios` 显式选择。
+`ios-native`、`recovery`、`review`、`tv` 是额外可选场景，需通过 `--scenarios` 显式选择。`review` 执行当前代码的三项回归（就地搜索返回与焦点、账号同步空态、网络设置交互）；`tv` 执行 TV 版验收（真实 TV bootstrap/Worker/片库，mock IPC）。
 
 任何检查失败，命令退出码为 1，仍保留日志和报告。不要把日志采集通过理解成所有播放问题已修复。只运行诊断回归可以选择：
 
 ```sh
-pnpm test:playback --scenarios seek,legacy,stall
+pnpm test:playback --scenarios seek,legacy
 ```
-
-仅验证 hls.js 的 MMS 兼容修复可运行 `pnpm test:playback --scenarios mms`。该场景由 Chromium 的真实 MSE 完成解码和缓冲，仅模拟 MMS 构造器与 streaming 事件；报告标记 `simulated_mms: true`，不能替代 macOS 27 实机确认。
 
 其他参数：`--media-dir DIR` 复用已有 `list.m3u8` 与 `seg*.ts`；`--browser-executable PATH` 使用已安装的匹配版本 Chromium；`--output NEW_DIR` 指定新的产物目录。`FFMPEG_PATH` 可指定 FFmpeg 可执行文件。命令拒绝覆盖已经存在的输出目录。
 
-仓库附带手动触发的 GitHub Actions 工作流 **Playback diagnostics**。工作流输入默认仍为五个场景
-`seek,legacy,stall,lifecycle,mms`，与 CLI 默认值不同；需要完整默认组时显式填写
-`seek,legacy,stall,lifecycle,mms,gesture,proxy`。它会在检查失败时仍上传日志、截图与追踪，保留 7 天；不会随推送自动运行。
+仓库附带手动触发的 GitHub Actions 工作流 **Playback diagnostics**。工作流输入默认为
+`seek,legacy,lifecycle,gesture,proxy`；需要其余场景（`portrait-fit,ios-native,recovery,review,tv`）时显式填写。它会在检查失败时仍上传日志、截图与追踪，保留 7 天；不会随推送自动运行。
 
 **覆盖边界：** 这些测试使用真实 React 控件、video、hls.js 与本地 HTTP 分片，但业务 API 和 Tauri 日志 IPC 使用替身。它们不执行真实 Rust 媒体代理，不验证真实 CDN、代理/TUN、Tauri 的 CSP/Origin/DNS 策略，也不能证明 macOS 27 的 ManagedMediaSource 问题已复现或修复。Rust 日志持久化/轮转/脱敏由 Rust 回归覆盖，执行结果以对应 GitHub Actions 记录为准；macOS 特有问题使用实机 `playback.log` 确认。

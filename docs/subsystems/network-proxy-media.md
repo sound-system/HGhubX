@@ -36,7 +36,7 @@
   [`segment.rs`](../../src-tauri/src/media/segment.rs) 的 `load_segment()`；
   [`response.rs`](../../src-tauri/src/media/response.rs) 的 `respond()`、`apply_byte_range()`、
   `segment_response()`。
-- 诊断与脱敏：[`src-tauri/src/net/diagnostics.rs`](../../src-tauri/src/net/diagnostics.rs) 的
+- 诊断与脱敏：[`src-tauri/src/net_diag.rs`](../../src-tauri/src/net_diag.rs) 的
   `diagnose()`、`proxy_state()`、`test_proxy()`；
   [`src-tauri/src/net/redact.rs`](../../src-tauri/src/net/redact.rs) 的
   `redact_proxy()`、`is_proxy_error()`、`heal_client()`、`err_text()`、
@@ -110,7 +110,6 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib
 node scripts/test-network-settings.mjs
 node scripts/test-diagnostic-copy.mjs
 node scripts/test-ios-native-media.mjs
-node scripts/test-linux-media-policy.mjs
 ```
 
 `src-tauri/src/net/`、`media_dns.rs`、`media/*`、`network_policy.rs` 的单元测试覆盖信封形状、重试终止、

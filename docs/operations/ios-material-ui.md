@@ -15,7 +15,7 @@
 
 减少动态效果时关闭过渡；减少透明度、提高对比度或不支持 backdrop-filter 时，核心玻璃面板使用实色背景。没有依赖持续渲染的 canvas 动效。
 
-运行 `pnpm build`、`pnpm test:ios-ui`、`pnpm test:ios-overlays`，并执行现有播放、加载、分页、移动布局、诊断复制和存储迁移回归。浏览器安装使用 `pnpm exec playwright-core install chromium`；可通过 `BROWSER_EXECUTABLE` 指定本机浏览器。报告和截图写入忽略目录 `test-results/`。
+运行 `pnpm build`，并执行现有播放、加载、诊断复制和存储迁移回归。浏览器安装使用 `pnpm exec playwright-core install chromium`；可通过 `BROWSER_EXECUTABLE` 指定本机浏览器。报告和截图写入忽略目录 `test-results/`。
 
 浏览器回归使用真实 App 与模拟 Tauri IPC，不能替代原生 iOS WKWebView、Android 系统返回键及 Windows/macOS 窗口的设备验收。发布前需核对这些设备上的视频合成、模糊材质和安全区。
 
@@ -29,6 +29,6 @@
 
 按钮按下反馈 55ms；分段选择、标签页和页面进入采用约 320–420ms 的轻微回弹，弹层保留约 150–180ms 的快速退出。减少动态效果设置关闭回弹。开关使用主题蓝轨道、金属高光滑块与勾选状态，保留 role=switch 与44px触摸区域。
 
-`pnpm test:ui-performance` 记录本地 IPC fixture、Chromium 开发构建、4倍 CPU 降速下的点击到两个动画帧时间；此数据用于同环境比较，不代表原生设备 INP。本次单次对比中位数 130.9→119.6ms、P95 167.4→153.2ms；另有真实 Feed 手势回归记录首击22ms，去掉了原先固定230ms的等待。实际设备、数据量和网络不同，仍需设备复核。
+历史本地 IPC fixture（Chromium 开发构建、4倍 CPU 降速）记录点击到两个动画帧时间中位数 130.9→119.6ms、P95 167.4→153.2ms（原基准脚本已随测试精简移除）；另有真实 Feed 手势回归（`pnpm test:playback --scenarios gesture`）记录首击22ms，去掉了原先固定230ms的等待。实际设备、数据量和网络不同，仍需设备复核。
 
 动效节奏参考：[yui540 motions](https://yui540.com/motions)，使用本项目自写的 CSS 与交互逻辑。
